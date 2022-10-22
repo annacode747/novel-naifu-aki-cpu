@@ -51,10 +51,8 @@ def torch_gc():
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
 
-print(base64.decodebytes(b"bG93dnJhbSAmJiBwb3J0YWJsZSBwYXRjaGVkIGJ5IGJpbGliaWxpQOeni+iRiWFhYWtp").decode("utf-8"))
 
-# make uc and prompt shapes match via padding for long prompts
-# finetune
+
 null_cond = None
 def fix_cond_shapes(model, prompt_condition, uc):
     global null_cond

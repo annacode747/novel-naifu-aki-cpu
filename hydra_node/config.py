@@ -129,12 +129,13 @@ def init_config_model():
     # Report on our CUDA memory and model.
     gb_gpu = int(5)
     logger.info(f"CPU: {config.cpu_id}")
-    logger.info(f"GPU: {config.cpu_id}")
-    logger.info(f"GPU RAM: {gb_gpu}gb")
+    # logger.info(f"GPU: {config.cpu_id}")
+    # logger.info(f"GPU RAM: {gb_gpu}gb")
 
 
     config.model_name = "stable-diffusion"
     logger.info(f"MODEL: {config.model_name}")
+    # TODO a * 配置文件
     """
     set DTYPE=float32
     set CLIP_CONTEXTS=3
