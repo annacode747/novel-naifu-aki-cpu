@@ -24,27 +24,31 @@ import base64
 from .lowvram import setup_for_low_vram
 from . import lautocast
 
+
 def seed_everything(seed: int):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
+
 def pil_upscale(image, scale=1):
     device = image.device
     dtype = image.dtype
-    image = Image.fromarray((image.cpu().permute(1,2,0).numpy().astype(np.float32) * 255.).astype(np.uint8))
+    image = Image.fromarray((image.cpu().permute(1, 2, 0).numpy().astype(np.float32) * 255.).astype(np.uint8))
     if scale > 1:
         image = image.resize((int(image.width * scale), int(image.height * scale)), resample=Image.LANCZOS)
     image = np.array(image)
     image = image.astype(np.float32) / 255.0
     image = image[None].transpose(0, 3, 1, 2)
     image = torch.from_numpy(image)
-    image = 2.*image - 1.
+    image = 2. * image - 1.
     image = repeat(image, '1 ... -> b ...', b=1)
     return image.to(device)
 
+
 def fix_batch(tensor, bs):
-    return torch.stack([tensor.squeeze(0)]*bs, dim=0)
+    return torch.stack([tensor.squeeze(0)] * bs, dim=0)
+
 
 def torch_gc():
     if torch.cuda.is_available():
@@ -52,8 +56,9 @@ def torch_gc():
         torch.cuda.ipc_collect()
 
 
-
 null_cond = None
+
+
 def fix_cond_shapes(model, prompt_condition, uc):
     global null_cond
     if null_cond is None:
@@ -63,6 +68,7 @@ def fix_cond_shapes(model, prompt_condition, uc):
     while prompt_condition.shape[1] < uc.shape[1]:
         prompt_condition = torch.cat((prompt_condition, null_cond.repeat((prompt_condition.shape[0], 1, 1))), axis=1)
     return prompt_condition, uc
+
 
 # mix conditioning vectors for prompts
 # @aero
@@ -91,6 +97,7 @@ def prompt_mixing(model, prompt_body, batch_size):
     else:
         return fix_batch(model.get_learned_conditioning([prompt_body]), batch_size)
 
+
 def sample_start_noise(seed, C, H, W, f, device="cuda"):
     if seed:
         gen = torch.Generator(device=device)
@@ -100,14 +107,18 @@ def sample_start_noise(seed, C, H, W, f, device="cuda"):
         noise = torch.randn([C, (H) // f, (W) // f], device=device).unsqueeze(0)
     return noise
 
+
 def sample_start_noise_special(seed, request, device="cuda"):
     if seed:
         gen = torch.Generator(device=device)
         gen.manual_seed(seed)
-        noise = torch.randn([request.latent_channels, request.height // request.downsampling_factor, request.width // request.downsampling_factor], generator=gen, device=device).unsqueeze(0)
+        noise = torch.randn([request.latent_channels, request.height // request.downsampling_factor,
+                             request.width // request.downsampling_factor], generator=gen, device=device).unsqueeze(0)
     else:
-        noise = torch.randn([request.latent_channels, request.height // request.downsampling_factor, request.width // request.downsampling_factor], device=device).unsqueeze(0)
+        noise = torch.randn([request.latent_channels, request.height // request.downsampling_factor,
+                             request.width // request.downsampling_factor], device=device).unsqueeze(0)
     return noise
+
 
 @torch.no_grad()
 def encode_image(image, model):
@@ -118,31 +129,33 @@ def encode_image(image, model):
     if isinstance(image, np.ndarray):
         image = torch.from_numpy(image)
 
-    #dtype = image.dtype
+    # dtype = image.dtype
     image = image.to(torch.float32)
-    #gets image as numpy array and returns as tensor
+
+    # gets image as numpy array and returns as tensor
     def preprocess_vqgan(x):
         x = x / 255.0
-        x = 2.*x - 1.
+        x = 2. * x - 1.
         return x
 
     image = image.permute(2, 0, 1).unsqueeze(0).float().cpu()
     image = preprocess_vqgan(image)
     image = model.encode(image).sample()
-    #image = image.to(dtype)
+    # image = image.to(dtype)
 
     return image
+
 
 @torch.no_grad()
 def decode_image(image, model):
     def custom_to_pil(x):
         x = x.detach().float().cpu()
         x = torch.clamp(x, -1., 1.)
-        x = (x + 1.)/2.
-        x = x.permute(0, 2, 3, 1)#.numpy()
-        #x = (255*x).astype(np.uint8)
-        #x = Image.fromarray(x)
-        #if not x.mode == "RGB":
+        x = (x + 1.) / 2.
+        x = x.permute(0, 2, 3, 1)  # .numpy()
+        # x = (255*x).astype(np.uint8)
+        # x = Image.fromarray(x)
+        # if not x.mode == "RGB":
         #    x = x.convert("RGB")
         return x
 
@@ -150,16 +163,17 @@ def decode_image(image, model):
     image = custom_to_pil(image)
     return image
 
+
 class VectorAdjustPrior(nn.Module):
     def __init__(self, hidden_size, inter_dim=64):
         super().__init__()
-        self.vector_proj = nn.Linear(hidden_size*2, inter_dim, bias=True)
-        self.out_proj = nn.Linear(hidden_size+inter_dim, hidden_size, bias=True)
+        self.vector_proj = nn.Linear(hidden_size * 2, inter_dim, bias=True)
+        self.out_proj = nn.Linear(hidden_size + inter_dim, hidden_size, bias=True)
 
     def forward(self, z):
         b, s = z.shape[0:2]
         x1 = torch.mean(z, dim=1).repeat(s, 1)
-        x2 = z.reshape(b*s, -1)
+        x2 = z.reshape(b * s, -1)
         x = torch.cat((x1, x2), dim=1)
         x = self.vector_proj(x)
         x = torch.cat((x2, x), dim=1)
@@ -173,8 +187,9 @@ class VectorAdjustPrior(nn.Module):
         model.load_state_dict(torch.load(model_path)["state_dict"])
         return model
 
+
 class StableInterface(nn.Module):
-    def __init__(self, model, thresholder = None):
+    def __init__(self, model, thresholder=None):
         super().__init__()
         self.inner_model = model
         self.sigma_to_t = model.sigma_to_t
@@ -192,6 +207,7 @@ class StableInterface(nn.Module):
             x_0 = self.thresholder(x_0)
 
         return x_0
+
 
 class StableDiffusionModel(nn.Module):
     def __init__(self, config):
@@ -213,7 +229,7 @@ class StableDiffusionModel(nn.Module):
             typex = torch.float16
         else:
             typex = torch.float32
-        
+
         # if lautocast.lowvram == True:
         #     setup_for_low_vram(model, False)
         # else:
@@ -221,7 +237,7 @@ class StableDiffusionModel(nn.Module):
         self.model = model.to(typex)
         # self.model = model.to(config.device).to(typex)
         if self.config.vae_path:
-            ckpt=torch.load(self.config.vae_path, map_location="cpu")
+            ckpt = torch.load(self.config.vae_path, map_location="cpu")
             loss = []
             for i in ckpt["state_dict"].keys():
                 if i[0:4] == "loss":
@@ -308,7 +324,8 @@ class StableDiffusionModel(nn.Module):
     def from_path(self, file):
         default_config = Path(self.config.default_config)
         if not default_config.is_file():
-            raise Exception("Default config to load not found! Either give a folder on MODEL_PATH or specify a config to use with this checkpoint on DEFAULT_CONFIG")
+            raise Exception(
+                "Default config to load not found! Either give a folder on MODEL_PATH or specify a config to use with this checkpoint on DEFAULT_CONFIG")
         model_config = OmegaConf.load(default_config)
         model = self.load_model_from_config(model_config, file)
         return model, model_config
@@ -349,7 +366,7 @@ class StableDiffusionModel(nn.Module):
 
         if request.image is not None:
             request.steps = 50
-            #request.sampler = "ddim_img2img" #enforce ddim for now
+            # request.sampler = "ddim_img2img" #enforce ddim for now
             if request.sampler == "plms":
                 request.sampler = "k_lms"
             if request.sampler == "ddim":
@@ -362,9 +379,11 @@ class StableDiffusionModel(nn.Module):
 
             main_noise = []
             start_noise = []
-            for seed in range(request.seed, request.seed+request.n_samples):
-                main_noise.append(sample_start_noise(seed, request.latent_channels, request.height, request.width, request.downsampling_factor, self.device))
-                start_noise.append(sample_start_noise(seed, request.latent_channels, request.height, request.width, request.downsampling_factor, self.device))
+            for seed in range(request.seed, request.seed + request.n_samples):
+                main_noise.append(sample_start_noise(seed, request.latent_channels, request.height, request.width,
+                                                     request.downsampling_factor, self.device))
+                start_noise.append(sample_start_noise(seed, request.latent_channels, request.height, request.width,
+                                                      request.downsampling_factor, self.device))
 
             main_noise = torch.cat(main_noise, dim=0)
             start_noise = torch.cat(start_noise, dim=0)
@@ -387,7 +406,7 @@ class StableDiffusionModel(nn.Module):
                 if request.masks is not None:
                     noise_x = sample_start_noise_special(request.seed, request, self.device)
                 else:
-                    noise_x = sample_start_noise_special(request.seed+seed_offset, request, self.device)
+                    noise_x = sample_start_noise_special(request.seed + seed_offset, request, self.device)
 
                 if request.masks is not None:
                     for maskobj in request.masks:
@@ -402,7 +421,8 @@ class StableDiffusionModel(nn.Module):
                         mask = (mask < 0.5).float()
 
                         # interpolate start noise
-                        noise_x = (noise_x * (1-mask)) + (sample_start_noise_special(mask_seed+seed_offset, request, self.device) * mask)
+                        noise_x = (noise_x * (1 - mask)) + (
+                                sample_start_noise_special(mask_seed + seed_offset, request, self.device) * mask)
 
                 main_noise.append(noise_x)
 
@@ -463,7 +483,8 @@ class StableDiffusionModel(nn.Module):
                         start_code = start_code * sigmas[0]
 
                     extra_args = {'cond': prompt_condition, 'uncond': uc, 'cond_scale': request.scale}
-                    samples = self.sampler_map[request.sampler](self.k_model, start_code, sigmas, request.seed, extra_args=extra_args)
+                    samples = self.sampler_map[request.sampler](self.k_model, start_code, sigmas, request.seed,
+                                                                extra_args=extra_args)
 
             sampless.append(samples)
             torch_gc()
@@ -473,8 +494,8 @@ class StableDiffusionModel(nn.Module):
             # TODO 注释了
             # with torch.autocast("cuda", enabled=self.config.amp):
             x_samples_ddim = self.model.decode_first_stage(samples.float())
-            #x_samples_ddim = decode_image(samples, self.model.first_stage_model)
-            #x_samples_ddim = self.model.first_stage_model.decode(samples.float())
+            # x_samples_ddim = decode_image(samples, self.model.first_stage_model)
+            # x_samples_ddim = self.model.first_stage_model.decode(samples.float())
             x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
 
             for x_sample in x_samples_ddim:
@@ -489,7 +510,7 @@ class StableDiffusionModel(nn.Module):
             torch.seed()
             np.random.seed()
 
-        #set hypernetwork to none after generation
+        # set hypernetwork to none after generation
         CrossAttention.set_hypernetwork(None)
 
         return images
@@ -512,7 +533,7 @@ class StableDiffusionModel(nn.Module):
                 request.latent_channels,
                 request.height // request.downsampling_factor,
                 request.width // request.downsampling_factor,
-                ], device=self.device)
+            ], device=self.device)
 
         prompt = [request.prompt] * request.n_samples
         prompt_condition = prompt_mixing(self.model, prompt[0], request.n_samples)
@@ -570,11 +591,14 @@ class StableDiffusionModel(nn.Module):
                 prompt_condition, uc = fix_cond_shapes(self.model, prompt_condition, uc)
 
             # encode (scaled latent)
-            start_code_terped=None
-            z_enc = self.ddim.stochastic_encode(init_latent, torch.tensor([t_enc]*request.n_samples).to(self.device), noise=start_code_terped)
+            start_code_terped = None
+
+            print("开始量化")
+            z_enc = self.ddim.stochastic_encode(init_latent, torch.tensor([t_enc] * request.n_samples).to(self.device),
+                                                noise=start_code_terped)
             # decode it
             samples = self.ddim.decode(z_enc, prompt_condition, t_enc, unconditional_guidance_scale=request.scale,
-                                    unconditional_conditioning=uc,)
+                                       unconditional_conditioning=uc, )
 
             x_samples_ddim = self.model.decode_first_stage(samples)
             x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
@@ -595,6 +619,7 @@ class StableDiffusionModel(nn.Module):
     @torch.no_grad()
     def sample_from_image(self, request):
         return
+
 
 class DalleMiniModel(nn.Module):
     def __init__(self, config):
@@ -637,19 +662,22 @@ class DalleMiniModel(nn.Module):
 
         return images
 
+
 def apply_temp(logits, temperature):
     logits = logits / temperature
     return logits
 
+
 @torch.no_grad()
-def generate(forward, prompt_tokens, tokenizer, tokens_to_generate=50, ds=False, ops_list=[{"temp": 0.9}], hypernetwork=None, non_deterministic=False, fully_deterministic=False):
+def generate(forward, prompt_tokens, tokenizer, tokens_to_generate=50, ds=False, ops_list=[{"temp": 0.9}],
+             hypernetwork=None, non_deterministic=False, fully_deterministic=False):
     in_tokens = prompt_tokens
     context = prompt_tokens
     generated = torch.zeros(len(ops_list), 0, dtype=torch.long).to(in_tokens.device)
     kv = None
     if non_deterministic:
         torch.seed()
-    #soft_required = ["top_k", "top_p"]
+    # soft_required = ["top_k", "top_p"]
     op_map = {
         "temp": apply_temp,
     }
@@ -659,7 +687,7 @@ def generate(forward, prompt_tokens, tokenizer, tokens_to_generate=50, ds=False,
             logits, kv = forward(in_tokens, past_key_values=kv, use_cache=True)
         else:
             logits, kv = forward(in_tokens, cache=True, kv=kv, hypernetwork=hypernetwork)
-        logits = logits[:, -1, :] #get the last token in the seq
+        logits = logits[:, -1, :]  # get the last token in the seq
         logits = torch.log_softmax(logits, dim=-1)
 
         batch = []
@@ -678,7 +706,7 @@ def generate(forward, prompt_tokens, tokenizer, tokens_to_generate=50, ds=False,
         logits = torch.cat(batch, dim=0)
         logits = torch.softmax(logits, dim=-1)
 
-        #fully_deterministic makes it deterministic across the batch
+        # fully_deterministic makes it deterministic across the batch
         if fully_deterministic:
             logits = logits.split(1, dim=0)
             logit_list = []
@@ -724,6 +752,7 @@ class BasedformerModel(nn.Module):
         is_safe, corrected = generate(self.model.module, prompt, self.tokenizer, tokens_to_generate=150, ds=True)
         return is_safe, corrected
 
+
 class EmbedderModel(nn.Module):
     def __init__(self, config=None):
         nn.Module.__init__(self)
@@ -750,7 +779,7 @@ class EmbedderModel(nn.Module):
             return sentence_embeddings
 
     def get_top_k(self, text):
-        #check if text is a substring in tag_count.keys()
+        # check if text is a substring in tag_count.keys()
         found = []
         a = bisect.bisect_left(self.tags, (text,))
         b = bisect.bisect_left(self.tags, (text + '\xff',), lo=a)
@@ -776,12 +805,12 @@ class EmbedderModel(nn.Module):
                 results.remove(result)
 
         results = sorted(results, key=lambda x: x[2], reverse=True)
-        #filter results for >0.5 confidence unless it has the search text in it and confidence is >0.4
+        # filter results for >0.5 confidence unless it has the search text in it and confidence is >0.4
         results = [x for x in results if x[2] > 0.5 or (x[2] > 0.4 and text in x[0])]
         if found:
             results = found + results
 
-        #max 10 results
+        # max 10 results
         results = results[:10]
         results = sorted(results, key=lambda x: x[1], reverse=True)
         return results

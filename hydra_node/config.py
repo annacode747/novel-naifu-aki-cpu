@@ -89,7 +89,7 @@ def init_config_model():
 
     config = DotMap()
     config.savefiles = os.getenv("SAVE_FILES", False)
-    config.dtype = os.getenv("DTYPE", "float16")
+    config.dtype = os.getenv("DTYPE", "float32")
     config.device = os.getenv("DEVICE", "cpu")
     config.amp = os.getenv("AMP", False)
     if config.amp == "1":
