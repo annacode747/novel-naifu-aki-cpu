@@ -6,7 +6,7 @@ jsonmerge
 numpy
 omegaconf
 pydantic
-sentence-transformers
+transformers
 six
 starlette
 torch
