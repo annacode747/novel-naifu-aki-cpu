@@ -9,3 +9,6 @@ Navel cpu painting，Extremely slow，Not recommended
 需要上面的网盘里面的models文件夹里的模型，推荐直接替换掉本项目的models 
 
 python环境推荐3.9以上
+
+### 特别标注
+因为这个项目只能在window运行，所有日后不打算跟新
